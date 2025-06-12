@@ -5,10 +5,11 @@ import time
 
 # 初始化pygame
 pygame.init()
+pygame.key.set_repeat(500, 100)  # 设置键盘重复响应
 
 # 游戏常量
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_HEIGHT = 700  # 增加屏幕高度，避免重叠
 GRID_SIZE = 8
 CELL_SIZE = 60
 MARGIN = 50
@@ -34,12 +35,14 @@ try:
     font = pygame.font.SysFont(["SimHei", "WenQuanYi Micro Hei", "Heiti TC"], 36)
     big_font = pygame.font.SysFont(["SimHei", "WenQuanYi Micro Hei", "Heiti TC"], 72)
     small_font = pygame.font.SysFont(["SimHei", "WenQuanYi Micro Hei", "Heiti TC"], 24)
+    medium_font = pygame.font.SysFont(["SimHei", "WenQuanYi Micro Hei", "Heiti TC"], 48)
 except:
     # 如果找不到中文字体，使用默认字体
     print("警告: 无法加载中文字体，将使用默认字体")
     font = pygame.font.SysFont(None, 36)
     big_font = pygame.font.SysFont(None, 72)
     small_font = pygame.font.SysFont(None, 24)
+    medium_font = pygame.font.SysFont(None, 48)
 
 class Game:
     def __init__(self):
@@ -49,7 +52,10 @@ class Game:
         self.animations = []
         self.game_over = False
         self.victory = False
-        self.show_instructions = True  # 控制是否显示游戏说明
+        self.show_instructions = False  # 控制是否显示游戏说明
+        self.paused = False  # 控制游戏是否暂停
+        self.pause_start_time = 0  # 暂停开始时间
+        self.pause_duration = 0  # 累计暂停时间
         self.initialize_grid()
         self.reset_game()
         
@@ -58,7 +64,10 @@ class Game:
         self.score = 0
         self.game_over = False
         self.victory = False
-        self.show_instructions = True
+        self.show_instructions = False
+        self.paused = False
+        self.pause_start_time = 0
+        self.pause_duration = 0
         self.start_time = time.time()
         self.end_time = self.start_time + GAME_TIME  # 设置结束时间
         
@@ -84,25 +93,25 @@ class Game:
         title = big_font.render("开心消消乐", True, (255, 215, 0))
         screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 10))
         
-        # 绘制分数
-        score_text = font.render(f"分数: {self.score}", True, (255, 255, 255))
-        screen.blit(score_text, (20, 20))
+        # 合并显示分数和目标分数
+        score_text = font.render(f"得分/目标: {self.score}/{TARGET_SCORE}", True, (255, 255, 255))
+        screen.blit(score_text, (20, 80))
         
         # 绘制游戏倒计时
-        remaining_time = max(0, int(self.end_time - time.time()))
+        remaining_time = max(0, int(self.get_remaining_time()))
         minutes = remaining_time // 60
         seconds = remaining_time % 60
         time_text = font.render(f"剩余时间: {minutes:02d}:{seconds:02d}", True, (255, 255, 255))
-        screen.blit(time_text, (20, 60))
+        screen.blit(time_text, (20, 130))
         
-        # 绘制目标分数
-        target_text = font.render(f"目标: {TARGET_SCORE}分", True, (255, 255, 255))
-        screen.blit(target_text, (20, 100))
+        # 绘制操作提示
+        hint_text = small_font.render("按 I 键查看说明 | 按 P 键暂停游戏", True, (200, 200, 200))
+        screen.blit(hint_text, (SCREEN_WIDTH - hint_text.get_width() - 20, 80))
         
         # 绘制网格背景
         grid_rect = pygame.Rect(
             MARGIN - 10, 
-            MARGIN + 40, 
+            MARGIN + 120,  # 下移网格位置，避免重叠
             GRID_SIZE * CELL_SIZE + 20, 
             GRID_SIZE * CELL_SIZE + 20
         )
@@ -113,7 +122,7 @@ class Game:
         for row in range(GRID_SIZE):
             for col in range(GRID_SIZE):
                 x = MARGIN + col * CELL_SIZE
-                y = MARGIN + 40 + row * CELL_SIZE
+                y = MARGIN + 120 + row * CELL_SIZE  # 下移方块位置
                 
                 # 检查是否有动画
                 animating = False
@@ -135,21 +144,13 @@ class Game:
                 if self.selected and self.selected[0] == row and self.selected[1] == col:
                     pygame.draw.rect(screen, (255, 255, 255), (x-4, y-4, CELL_SIZE+4, CELL_SIZE+4), 3, 12)
         
-        # 绘制游戏说明
+        # 绘制游戏说明弹窗
         if self.show_instructions:
-            instructions = [
-                "游戏说明:",
-                "1. 点击一个方块选中它",
-                "2. 点击相邻方块进行交换",
-                "3. 三个或更多相同方块连在一起即可消除",
-                "4. 消除后上方的方块会下落",
-                "5. 按 R 键重新开始游戏",
-                "6. 按 H 键显示/隐藏说明",
-            ]
-            
-            for i, text in enumerate(instructions):
-                instr = font.render(text, True, (200, 200, 200))
-                screen.blit(instr, (SCREEN_WIDTH - 350, 100 + i * 40))
+            self.draw_instructions_window()
+        
+        # 绘制暂停窗口
+        if self.paused and not self.show_instructions:
+            self.draw_pause_window()
         
         # 检查游戏是否结束
         if self.game_over or self.victory:
@@ -166,22 +167,111 @@ class Game:
             screen.blit(message, (SCREEN_WIDTH // 2 - message.get_width() // 2, SCREEN_HEIGHT // 2 - 100))
             
             # 绘制最终分数
-            score_message = font.render(f"最终分数: {self.score}", True, (255, 255, 255))
+            score_message = font.render(f"最终分数: {self.score}/{TARGET_SCORE}", True, (255, 255, 255))
             screen.blit(score_message, (SCREEN_WIDTH // 2 - score_message.get_width() // 2, SCREEN_HEIGHT // 2))
             
             # 绘制重新开始提示
             restart_message = small_font.render("按 R 键重新开始游戏", True, (200, 200, 200))
             screen.blit(restart_message, (SCREEN_WIDTH // 2 - restart_message.get_width() // 2, SCREEN_HEIGHT // 2 + 60))
     
+    def get_remaining_time(self):
+        # 计算剩余时间
+        if self.paused or self.game_over or self.victory:
+            # 如果游戏暂停、结束或通关，返回暂停/结束时的剩余时间
+            return self.paused_remaining_time
+        else:
+            # 如果游戏进行中，返回实际剩余时间
+            return max(0, self.end_time - time.time())
+    
+    def draw_instructions_window(self):
+        # 绘制游戏说明弹窗
+        window_width = 500
+        window_height = 400
+        window_x = (SCREEN_WIDTH - window_width) // 2
+        window_y = (SCREEN_HEIGHT - window_height) // 2
+        
+        # 绘制窗口背景
+        window = pygame.Surface((window_width, window_height), pygame.SRCALPHA)
+        window.fill((0, 0, 0, 220))
+        screen.blit(window, (window_x, window_y))
+        
+        # 绘制窗口边框
+        pygame.draw.rect(screen, (255, 215, 0), (window_x, window_y, window_width, window_height), 3)
+        
+        # 绘制标题
+        title = medium_font.render("游戏说明", True, (255, 215, 0))
+        screen.blit(title, (window_x + (window_width - title.get_width()) // 2, window_y + 20))
+        
+        # 绘制说明内容
+        instructions = [
+            "1. 点击一个方块选中它",
+            "2. 点击相邻方块进行交换",
+            "3. 三个或更多相同方块连在一起即可消除",
+            "4. 消除后上方的方块会下落",
+            "5. 游戏时间为60秒，目标分数为1000分",
+            "6. 按 I 键显示/隐藏说明",
+            "7. 按 P 键暂停/继续游戏",
+            "8. 按 R 键重新开始游戏",
+            "9. 按 ESC 键退出游戏",
+        ]
+        
+        for i, text in enumerate(instructions):
+            instr = font.render(text, True, (255, 255, 255))
+            screen.blit(instr, (window_x + 40, window_y + 80 + i * 40))
+        
+        # 绘制当前状态提示
+        status_text = small_font.render(f"游戏已暂停 - 得分: {self.score}/{TARGET_SCORE}", True, (255, 215, 0))
+        screen.blit(status_text, (window_x + (window_width - status_text.get_width()) // 2, window_y + window_height - 80))
+        
+        # 绘制关闭提示
+        close_text = small_font.render("按 I 键关闭并继续游戏", True, (200, 200, 200))
+        screen.blit(close_text, (window_x + (window_width - close_text.get_width()) // 2, window_y + window_height - 40))
+    
+    def draw_pause_window(self):
+        # 绘制暂停窗口
+        window_width = 400
+        window_height = 300
+        window_x = (SCREEN_WIDTH - window_width) // 2
+        window_y = (SCREEN_HEIGHT - window_height) // 2
+        
+        # 绘制窗口背景
+        window = pygame.Surface((window_width, window_height), pygame.SRCALPHA)
+        window.fill((0, 0, 0, 220))
+        screen.blit(window, (window_x, window_y))
+        
+        # 绘制窗口边框
+        pygame.draw.rect(screen, (255, 215, 0), (window_x, window_y, window_width, window_height), 3)
+        
+        # 绘制标题
+        title = medium_font.render("游戏暂停", True, (255, 215, 0))
+        screen.blit(title, (window_x + (window_width - title.get_width()) // 2, window_y + 40))
+        
+        # 绘制分数和时间
+        score_text = font.render(f"得分/目标: {self.score}/{TARGET_SCORE}", True, (255, 255, 255))
+        screen.blit(score_text, (window_x + (window_width - score_text.get_width()) // 2, window_y + 100))
+        
+        remaining_time = max(0, int(self.get_remaining_time()))
+        minutes = remaining_time // 60
+        seconds = remaining_time % 60
+        time_text = font.render(f"剩余时间: {minutes:02d}:{seconds:02d}", True, (255, 255, 255))
+        screen.blit(time_text, (window_x + (window_width - time_text.get_width()) // 2, window_y + 150))
+        
+        # 绘制操作提示
+        resume_text = small_font.render("按 P 键继续游戏", True, (200, 200, 200))
+        screen.blit(resume_text, (window_x + (window_width - resume_text.get_width()) // 2, window_y + 200))
+        
+        restart_text = small_font.render("按 R 键重新开始", True, (200, 200, 200))
+        screen.blit(restart_text, (window_x + (window_width - restart_text.get_width()) // 2, window_y + 230))
+    
     def handle_click(self, pos):
-        # 如果游戏已结束，不处理点击事件
-        if self.game_over or self.victory:
+        # 如果游戏已结束或暂停，不处理点击事件
+        if self.game_over or self.paused:
             return
             
         # 将屏幕坐标转换为网格坐标
         x, y = pos
         col = (x - MARGIN) // CELL_SIZE
-        row = (y - MARGIN - 40) // CELL_SIZE
+        row = (y - MARGIN - 120) // CELL_SIZE  # 调整计算方式以适应下移的网格
         
         # 检查是否在网格范围内
         if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
@@ -268,7 +358,8 @@ class Game:
             if self.score >= TARGET_SCORE:
                 self.victory = True
                 # 通关后停止倒计时
-                self.end_time = time.time()
+                self.paused = True
+                self.paused_remaining_time = 0  # 通关后剩余时间为0
             
             # 移除方块（设置为-1表示空）
             for row, col in matches:
@@ -313,8 +404,8 @@ class Game:
                     ))
     
     def update_animations(self):
-        # 如果游戏已结束，不更新动画
-        if self.game_over or self.victory:
+        # 如果游戏已结束或暂停，不更新动画
+        if self.game_over or self.paused:
             return
             
         # 更新所有动画
@@ -370,14 +461,32 @@ class Game:
             self.fill_empty_cells()
         
         # 检查时间是否用完
-        if time.time() >= self.end_time and not self.victory:
+        if self.get_remaining_time() <= 0 and not self.victory:
             self.game_over = True
+            self.paused = True  # 游戏结束时暂停
+    
+    def toggle_pause(self):
+        # 切换暂停状态
+        if self.paused:
+            # 恢复游戏
+            self.paused = False
+            # 计算新的结束时间
+            self.end_time = time.time() + self.paused_remaining_time
+            print(f"游戏恢复，剩余时间: {self.paused_remaining_time:.2f}秒")
+        else:
+            # 暂停游戏
+            self.paused = True
+            # 记录当前剩余时间
+            self.paused_remaining_time = max(0, self.end_time - time.time())
+            print(f"游戏暂停，剩余时间: {self.paused_remaining_time:.2f}秒")
 
 # 创建游戏实例
 game = Game()
 
 # 游戏主循环
 clock = pygame.time.Clock()
+
+print("游戏已启动，按 I 键查看说明，按 P 键暂停游戏")
 
 while True:
     # 处理事件
@@ -390,15 +499,27 @@ while True:
                 game.handle_click(event.pos)
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:  # 按R键重置游戏
-                print("重置游戏")  # 添加调试信息
+                print("检测到 R 键按下，重置游戏")
                 game.initialize_grid()
                 game.reset_game()
             elif event.key == pygame.K_ESCAPE:  # 按ESC键退出
                 pygame.quit()
                 sys.exit()
-            elif event.key == pygame.K_h:  # 按H键显示/隐藏游戏说明
-                print("切换说明显示状态")  # 添加调试信息
+            elif event.key == pygame.K_i:  # 按I键显示/隐藏游戏说明
+                print("检测到 I 键按下，切换说明显示状态")
                 game.show_instructions = not game.show_instructions
+                if game.show_instructions:
+                    # 显示说明时暂停游戏
+                    if not game.paused:
+                        game.toggle_pause()
+                else:
+                    # 关闭说明时，直接恢复游戏
+                    if game.paused:
+                        game.toggle_pause()
+            elif event.key == pygame.K_p:  # 按P键暂停/继续游戏
+                print("检测到 P 键按下，切换暂停状态")
+                game.show_instructions = False  # 暂停时关闭说明窗口
+                game.toggle_pause()
     
     # 更新游戏状态
     game.update_animations()
@@ -409,7 +530,7 @@ while True:
     # 显示帧率
     fps = int(clock.get_fps())
     fps_text = font.render(f"FPS: {fps}", True, (200, 200, 200))
-    screen.blit(fps_text, (SCREEN_WIDTH - 120, 20))
+    screen.blit(fps_text, (SCREEN_WIDTH - 120, 180))
     
     # 更新屏幕
     pygame.display.flip()
