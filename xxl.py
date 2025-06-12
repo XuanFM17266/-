@@ -49,6 +49,7 @@ class Game:
         self.animations = []
         self.game_over = False
         self.victory = False
+        self.show_instructions = True  # 控制是否显示游戏说明
         self.initialize_grid()
         self.reset_game()
         
@@ -57,6 +58,7 @@ class Game:
         self.score = 0
         self.game_over = False
         self.victory = False
+        self.show_instructions = True
         self.start_time = time.time()
         self.end_time = self.start_time + GAME_TIME  # 设置结束时间
         
@@ -133,19 +135,21 @@ class Game:
                 if self.selected and self.selected[0] == row and self.selected[1] == col:
                     pygame.draw.rect(screen, (255, 255, 255), (x-4, y-4, CELL_SIZE+4, CELL_SIZE+4), 3, 12)
         
-        # 绘制操作说明
-        instructions = [
-            "游戏说明:",
-            "1. 点击一个方块选中它",
-            "2. 点击相邻方块进行交换",
-            "3. 三个或更多相同方块连在一起即可消除",
-            "4. 消除后上方的方块会下落",
-            "5. 按 R 键重新开始游戏"
-        ]
-        
-        for i, text in enumerate(instructions):
-            instr = font.render(text, True, (200, 200, 200))
-            screen.blit(instr, (SCREEN_WIDTH - 350, 100 + i * 40))
+        # 绘制游戏说明
+        if self.show_instructions:
+            instructions = [
+                "游戏说明:",
+                "1. 点击一个方块选中它",
+                "2. 点击相邻方块进行交换",
+                "3. 三个或更多相同方块连在一起即可消除",
+                "4. 消除后上方的方块会下落",
+                "5. 按 R 键重新开始游戏",
+                "6. 按 H 键显示/隐藏说明",
+            ]
+            
+            for i, text in enumerate(instructions):
+                instr = font.render(text, True, (200, 200, 200))
+                screen.blit(instr, (SCREEN_WIDTH - 350, 100 + i * 40))
         
         # 检查游戏是否结束
         if self.game_over or self.victory:
@@ -158,7 +162,7 @@ class Game:
             if self.victory:
                 message = big_font.render("恭喜通关!", True, (255, 215, 0))
             else:
-                message = big_font.render("游戏结束!", True, (255, 0, 0))
+                message = big_font.render("游戏失败!", True, (255, 0, 0))
             screen.blit(message, (SCREEN_WIDTH // 2 - message.get_width() // 2, SCREEN_HEIGHT // 2 - 100))
             
             # 绘制最终分数
@@ -263,6 +267,8 @@ class Game:
             # 检查是否达到通关条件
             if self.score >= TARGET_SCORE:
                 self.victory = True
+                # 通关后停止倒计时
+                self.end_time = time.time()
             
             # 移除方块（设置为-1表示空）
             for row, col in matches:
@@ -372,13 +378,8 @@ game = Game()
 
 # 游戏主循环
 clock = pygame.time.Clock()
-last_time = time.time()
 
 while True:
-    current_time = time.time()
-    dt = current_time - last_time
-    last_time = current_time
-    
     # 处理事件
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -389,11 +390,15 @@ while True:
                 game.handle_click(event.pos)
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_r:  # 按R键重置游戏
+                print("重置游戏")  # 添加调试信息
                 game.initialize_grid()
                 game.reset_game()
             elif event.key == pygame.K_ESCAPE:  # 按ESC键退出
                 pygame.quit()
                 sys.exit()
+            elif event.key == pygame.K_h:  # 按H键显示/隐藏游戏说明
+                print("切换说明显示状态")  # 添加调试信息
+                game.show_instructions = not game.show_instructions
     
     # 更新游戏状态
     game.update_animations()
